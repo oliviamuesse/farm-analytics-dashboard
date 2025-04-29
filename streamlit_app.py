@@ -60,38 +60,63 @@ elif view == "Labor Cost by Job Type":
 # --- Labor Budget vs Actual View
 elif view == "Labor Budget vs Actual":
     st.header("🧾 Budget vs Actual Labor Costs by Crew")
-    actual = laborsot.groupby(['Week Start Date', 'Crew']).agg({
-        'Worker ID': 'nunique',
-        'Regular Hours Worked': 'sum',
-        'Overtime Hours Worked': 'sum',
-        'Total Pay ($)': 'sum'
-    }).reset_index().rename(columns={
-        'Worker ID': 'Unique Workers',
-        'Regular Hours Worked': 'Total Reg Hours',
-        'Overtime Hours Worked': 'Total OT Hours',
-        'Total Pay ($)': 'Actual Pay'
-    })
+    actual = laborsot.groupby(['Week Start Date', 'Crew'])['Total Pay ($)'].sum().reset_index()
     forecast = budget.groupby(['Week Start Date', 'Crew'])['Total Pay Forecast ($)'].sum().reset_index()
     df = actual.merge(forecast, on=['Week Start Date', 'Crew'], how='outer').fillna(0)
-    df['Variance ($)'] = df['Actual Pay'] - df['Total Pay Forecast ($)']
 
-    for crew in df['Crew'].unique():
-        crew_df = df[df['Crew'] == crew].set_index('Week Start Date')
-        st.subheader(f"👷‍♀️ Crew: {crew}")
-        st.line_chart(crew_df[['Actual Pay', 'Total Pay Forecast ($)', 'Variance ($)']])
+    st.subheader("📊 Crew Forecast vs Actual Labor Costs")
+    crews = df['Crew'].unique()
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    for i, crew in enumerate(crews):
+        crew_df = df[df['Crew'] == crew]
+        x = np.arange(len(crew_df['Week Start Date']))
+        width = 0.35
+        ax.bar(x + i*width, crew_df['Total Pay Forecast ($)'], width=width, label=f"{crew} Forecast", hatch='//', alpha=0.5)
+        ax.bar(x + i*width, crew_df['Total Pay ($)'], width=width, label=f"{crew} Actual", alpha=0.7)
+
+    ax.set_xticks(np.arange(len(crew_df['Week Start Date'])) + width/2)
+    ax.set_xticklabels(crew_df['Week Start Date'].dt.strftime('%Y-%m-%d'), rotation=45)
+    ax.set_ylabel('Pay ($)')
+    ax.set_title('Crew Forecast vs Actual Labor Costs')
+    ax.legend()
+    ax.grid(True)
+    st.pyplot(fig)
 
     st.dataframe(df)
 
 # --- GL Actual vs Budget View
 elif view == "GL Actual vs Budget":
-    st.header("📚 GL Actual vs Budget Comparison")
-    actual = gl.groupby(['Week Start Date', 'GL Category'])['Amount ($)'].sum().reset_index()
+    st.header("📚 GL Actual vs Budget (High-Level Categories)")
+    actual = gl.copy()
+    # Map detailed GL categories into broader ones
+    mapping = {
+        'Material Expenses': 'Materials',
+        'Shipping Supplies': 'Materials',
+        'Stickers': 'Materials',
+        'Pallets': 'Materials',
+        'Line Chemicals': 'Materials',
+        'Lime DPA': 'Materials',
+        'Line Propane': 'Materials',
+        'Nitrogen Tank': 'Materials',
+        'Labor Benefits': 'Labor Costs',
+        'FICA Taxes': 'Labor Costs',
+        'FUTA Taxes': 'Labor Costs',
+        'SUTA Taxes': 'Labor Costs',
+        'PFMLA Contributions': 'Labor Costs',
+        'Production Labor Total': 'Labor Costs',
+        'Back Office Labor Total': 'Labor Costs'
+    }
+    actual['High-Level Category'] = actual['GL Category'].map(mapping).fillna('Other')
     budget_labor = budget.copy()
     budget_labor['GL Category'] = 'Labor Budget Forecast'
-    budget_grouped = budget_labor.groupby(['Week Start Date', 'GL Category'])['Total Pay Forecast ($)'].sum().reset_index()
-    budget_grouped = budget_grouped.rename(columns={'Total Pay Forecast ($)': 'Amount ($)'})
-    df = pd.concat([actual, budget_grouped], axis=0).fillna(0)
-    pivot = df.pivot(index='Week Start Date', columns='GL Category', values='Amount ($)').fillna(0)
+    budget_labor['High-Level Category'] = 'Labor Costs'
+    budget_grouped = budget_labor.groupby(['Week Start Date', 'High-Level Category'])['Total Pay Forecast ($)'].sum().reset_index().rename(columns={'Total Pay Forecast ($)': 'Amount ($)'})
+
+    actual_grouped = actual.groupby(['Week Start Date', 'High-Level Category'])['Amount ($)'].sum().reset_index()
+
+    df = pd.concat([actual_grouped, budget_grouped], axis=0).fillna(0)
+    pivot = df.pivot(index='Week Start Date', columns='High-Level Category', values='Amount ($)').fillna(0)
 
     st.line_chart(pivot)
     st.dataframe(df.sort_values('Week Start Date'))
